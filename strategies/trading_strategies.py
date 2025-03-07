@@ -1,252 +1,180 @@
-from datetime import datetime
+from typing import Dict, List, Optional
 import pandas as pd
 import numpy as np
-from typing import Dict, List, Optional, Tuple
-from models.indicators import TechnicalIndicators
-from models.pattern_recognition import ChartPatternRecognition
-from models.ai_model import AIModel
+from datetime import datetime
+import talib
+import logging
+from .strategy_base import StrategyBase
 
-class TradingStrategy:
-    def __init__(self):
-        self.current_time = datetime(2025, 3, 6, 22, 57, 14)
-        self.current_user = 'dhineshk6'
-        self.indicators = TechnicalIndicators()
-        self.pattern_recognition = ChartPatternRecognition()
-        self.ai_model = AIModel()
+logger = logging.getLogger(__name__)
+
+class TradingStrategy(StrategyBase):
+    """Implementation of a combined technical analysis trading strategy"""
+    
+    def __init__(self, 
+                 rsi_period: int = 14,
+                 rsi_overbought: int = 70,
+                 rsi_oversold: int = 30,
+                 ema_short: int = 9,
+                 ema_long: int = 21,
+                 bb_period: int = 20,
+                 bb_std: float = 2.0,
+                 macd_fast: int = 12,
+                 macd_slow: int = 26,
+                 macd_signal: int = 9):
+        """
+        Initialize trading strategy with parameters
         
-    def generate_signals(self, df: pd.DataFrame) -> Dict:
-        """Generate trading signals using multiple strategies"""
+        Args:
+            rsi_period (int): RSI calculation period
+            rsi_overbought (int): RSI overbought threshold
+            rsi_oversold (int): RSI oversold threshold
+            ema_short (int): Short EMA period
+            ema_long (int): Long EMA period
+            bb_period (int): Bollinger Bands period
+            bb_std (float): Bollinger Bands standard deviation
+            macd_fast (int): MACD fast period
+            macd_slow (int): MACD slow period
+            macd_signal (int): MACD signal period
+        """
+        super().__init__()
+        
+        # Strategy metadata
+        self.description = "Combined technical analysis strategy using RSI, EMA, BB, and MACD"
+        self.version = "1.0.0"
+        
+        # Strategy parameters
+        self.rsi_period = rsi_period
+        self.rsi_overbought = rsi_overbought
+        self.rsi_oversold = rsi_oversold
+        self.ema_short = ema_short
+        self.ema_long = ema_long
+        self.bb_period = bb_period
+        self.bb_std = bb_std
+        self.macd_fast = macd_fast
+        self.macd_slow = macd_slow
+        self.macd_signal = macd_signal
+
+    def calculate_indicators(self, data: pd.DataFrame) -> pd.DataFrame:
+        """Calculate technical indicators"""
         try:
-            # Get signals from different strategies
-            technical_signals = self._get_technical_signals(df)
-            pattern_signals = self._get_pattern_signals(df)
-            ai_signals = self._get_ai_signals(df)
+            df = data.copy()
             
-            # Combine signals with weights
-            combined_signal = self._combine_signals(
-                technical_signals,
-                pattern_signals,
-                ai_signals
+            # RSI
+            df['rsi'] = talib.RSI(df['close'], timeperiod=self.rsi_period)
+            
+            # EMAs
+            df['ema_short'] = talib.EMA(df['close'], timeperiod=self.ema_short)
+            df['ema_long'] = talib.EMA(df['close'], timeperiod=self.ema_long)
+            
+            # MACD
+            df['macd'], df['macd_signal'], df['macd_hist'] = talib.MACD(
+                df['close'],
+                fastperiod=self.macd_fast,
+                slowperiod=self.macd_slow,
+                signalperiod=self.macd_signal
             )
             
-            return {
-                'timestamp': self.current_time,
-                'technical_signals': technical_signals,
-                'pattern_signals': pattern_signals,
-                'ai_signals': ai_signals,
-                'combined_signal': combined_signal,
-                'metadata': {
-                    'user': self.current_user,
-                    'strategy_version': '1.0.0'
-                }
-            }
+            # Bollinger Bands
+            df['bb_upper'], df['bb_middle'], df['bb_lower'] = talib.BBANDS(
+                df['close'],
+                timeperiod=self.bb_period,
+                nbdevup=self.bb_std,
+                nbdevdn=self.bb_std
+            )
+            
+            return df
             
         except Exception as e:
-            print(f"Error generating signals: {e}")
-            return self._get_empty_signals()
-    
-    def _get_technical_signals(self, df: pd.DataFrame) -> Dict:
-        """Generate signals based on technical indicators"""
+            logger.error(f"Error calculating indicators: {e}")
+            return data
+
+    def generate_signals(self, data: pd.DataFrame, positions: List = None) -> Dict:
+        """Generate trading signals"""
         try:
-            # Add technical indicators if not present
-            if 'rsi' not in df.columns:
-                df = self.indicators.add_all_indicators(df)
+            if len(data) < self.ema_long:
+                return {'action': 'hold'}
             
+            # Validate data
+            if not self.validate_data(data):
+                return {'action': 'hold'}
+            
+            # Calculate indicators
+            df = self.calculate_indicators(data)
             current = df.iloc[-1]
+            previous = df.iloc[-2]
             
-            # RSI signals
-            rsi_signal = 1 if current['rsi'] < 30 else (-1 if current['rsi'] > 70 else 0)
-            
-            # MACD signals
-            macd_signal = 1 if current['macd_diff'] > 0 else (-1 if current['macd_diff'] < 0 else 0)
-            
-            # Bollinger Bands signals
-            bb_signal = 1 if current['close'] < current['bb_lower'] else (
-                -1 if current['close'] > current['bb_upper'] else 0
-            )
-            
-            # Moving Average signals
-            ma_signal = 1 if current['ema_9'] > current['ema_21'] else -1
-            
-            # Volume signals
-            volume_signal = 1 if current['volume'] > current['volume_sma'] else -1
-            
-            # Combine technical signals
-            technical_score = (
-                rsi_signal * 0.2 +
-                macd_signal * 0.3 +
-                bb_signal * 0.2 +
-                ma_signal * 0.2 +
-                volume_signal * 0.1
-            )
-            
-            return {
-                'signal': technical_score,
-                'components': {
-                    'rsi': rsi_signal,
-                    'macd': macd_signal,
-                    'bollinger': bb_signal,
-                    'moving_average': ma_signal,
-                    'volume': volume_signal
-                },
-                'indicators': {
-                    'rsi': current['rsi'],
-                    'macd': current['macd_diff'],
-                    'bb_width': current['bb_width'],
-                    'atr': current['atr']
-                }
-            }
-            
-        except Exception as e:
-            print(f"Error in technical signals: {e}")
-            return {'signal': 0, 'components': {}, 'indicators': {}}
-    
-    def _get_pattern_signals(self, df: pd.DataFrame) -> Dict:
-        """Generate signals based on chart patterns"""
-        try:
-            patterns = self.pattern_recognition.identify_patterns(df)
-            
-            # Analyze recent patterns
-            recent_patterns = self._filter_recent_patterns(patterns)
-            
-            if not recent_patterns:
-                return {'signal': 0, 'patterns': [], 'confidence': 0}
-            
-            # Calculate pattern-based signal
-            pattern_signal = 0
-            total_confidence = 0
-            
-            pattern_weights = {
-                'head_and_shoulders': -0.8,
-                'inverse_head_and_shoulders': 0.8,
-                'double_top': -0.6,
-                'double_bottom': 0.6,
-                'bull_flag': 0.5,
-                'bear_flag': -0.5,
-                'ascending_triangle': 0.7,
-                'descending_triangle': -0.7
-            }
-            
-            for pattern in recent_patterns:
-                weight = pattern_weights.get(pattern['type'], 0)
-                confidence = pattern['confidence']
-                pattern_signal += weight * confidence
-                total_confidence += confidence
-            
-            if total_confidence > 0:
-                pattern_signal /= total_confidence
-            
-            return {
-                'signal': pattern_signal,
-                'patterns': recent_patterns,
-                'confidence': total_confidence
-            }
-            
-        except Exception as e:
-            print(f"Error in pattern signals: {e}")
-            return {'signal': 0, 'patterns': [], 'confidence': 0}
-    
-    def _get_ai_signals(self, df: pd.DataFrame) -> Dict:
-        """Generate signals using AI model"""
-        try:
-            ai_prediction = self.ai_model.get_trading_signals(df)
-            
-            return {
-                'signal': ai_prediction['signal'],
-                'confidence': ai_prediction['confidence'],
-                'metadata': {
-                    'model_version': '1.0.0',
-                    'timestamp': self.current_time
-                }
-            }
-            
-        except Exception as e:
-            print(f"Error in AI signals: {e}")
-            return {'signal': 0, 'confidence': 0, 'metadata': {}}
-    
-    def _combine_signals(
-        self,
-        technical_signals: Dict,
-        pattern_signals: Dict,
-        ai_signals: Dict
-    ) -> Dict:
-        """Combine signals from different sources"""
-        try:
-            # Weights for different signal sources
-            weights = {
-                'technical': 0.4,
-                'pattern': 0.3,
-                'ai': 0.3
-            }
-            
-            # Calculate weighted average
-            combined_signal = (
-                technical_signals['signal'] * weights['technical'] +
-                pattern_signals['signal'] * weights['pattern'] +
-                ai_signals['signal'] * weights['ai']
-            )
-            
-            # Calculate confidence score
-            confidence = (
-                weights['technical'] +
-                pattern_signals['confidence'] * weights['pattern'] +
-                ai_signals['confidence'] * weights['ai']
-            )
-            
-            # Determine signal strength
-            signal_strength = abs(combined_signal)
-            
-            return {
-                'signal': combined_signal,
-                'direction': 'buy' if combined_signal > 0.2 else (
-                    'sell' if combined_signal < -0.2 else 'neutral'
-                ),
-                'strength': signal_strength,
-                'confidence': confidence,
-                'timestamp': self.current_time
-            }
-            
-        except Exception as e:
-            print(f"Error combining signals: {e}")
-            return self._get_empty_signals()
-    
-    def _filter_recent_patterns(self, patterns: Dict[str, List[Dict]]) -> List[Dict]:
-        """Filter patterns to get only recent ones"""
-        recent_patterns = []
-        for pattern_type, pattern_list in patterns.items():
-            for pattern in pattern_list:
-                if pattern['end_idx'] >= len(pattern_list) - 5:  # Consider last 5 bars
-                    pattern['type'] = pattern_type
-                    recent_patterns.append(pattern)
-        return recent_patterns
-    
-    def _get_empty_signals(self) -> Dict:
-        """Return empty signals structure"""
-        return {
-            'signal': 0,
-            'direction': 'neutral',
-            'strength': 0,
-            'confidence': 0,
-            'timestamp': self.current_time
-        }
-    
-    def get_strategy_info(self) -> Dict:
-        """Get information about the trading strategy"""
-        return {
-            'name': 'Multi-Strategy Trading System',
-            'version': '1.0.0',
-            'components': {
-                'technical_analysis': True,
-                'pattern_recognition': True,
-                'ai_model': True
-            },
-            'weights': {
-                'technical': 0.4,
-                'pattern': 0.3,
-                'ai': 0.3
-            },
-            'metadata': {
-                'last_updated': self.current_time,
+            # Initialize signal
+            signal = {
+                'action': 'hold',
+                'direction': None,
+                'strategy': self.name,
+                'risk_per_trade': 0.02,
+                'stop_loss_pct': 0.02,
+                'take_profit_pct': 0.04,
+                'timestamp': self.current_time,
                 'user': self.current_user
             }
+            
+            # Check for long signals
+            long_conditions = (
+                current['rsi'] < self.rsi_oversold and
+                current['close'] < current['bb_lower'] and
+                current['ema_short'] > current['ema_long'] and
+                current['macd_hist'] > 0 and
+                previous['macd_hist'] <= 0
+            )
+            
+            # Check for short signals
+            short_conditions = (
+                current['rsi'] > self.rsi_overbought and
+                current['close'] > current['bb_upper'] and
+                current['ema_short'] < current['ema_long'] and
+                current['macd_hist'] < 0 and
+                previous['macd_hist'] >= 0
+            )
+            
+            # Generate signal based on conditions
+            if long_conditions:
+                signal.update({
+                    'action': 'enter',
+                    'direction': 'long',
+                    'reason': 'RSI oversold + BB lower + EMA & MACD crossover',
+                    'indicators': {
+                        'rsi': current['rsi'],
+                        'bb_lower': current['bb_lower'],
+                        'macd_hist': current['macd_hist']
+                    }
+                })
+            elif short_conditions:
+                signal.update({
+                    'action': 'enter',
+                    'direction': 'short',
+                    'reason': 'RSI overbought + BB upper + EMA & MACD crossover',
+                    'indicators': {
+                        'rsi': current['rsi'],
+                        'bb_upper': current['bb_upper'],
+                        'macd_hist': current['macd_hist']
+                    }
+                })
+            
+            return signal
+            
+        except Exception as e:
+            logger.error(f"Error generating signals: {e}")
+            return {'action': 'hold'}
+
+    def get_strategy_parameters(self) -> Dict:
+        """Get strategy parameters"""
+        return {
+            'rsi_period': self.rsi_period,
+            'rsi_overbought': self.rsi_overbought,
+            'rsi_oversold': self.rsi_oversold,
+            'ema_short': self.ema_short,
+            'ema_long': self.ema_long,
+            'bb_period': self.bb_period,
+            'bb_std': self.bb_std,
+            'macd_fast': self.macd_fast,
+            'macd_slow': self.macd_slow,
+            'macd_signal': self.macd_signal
         }
