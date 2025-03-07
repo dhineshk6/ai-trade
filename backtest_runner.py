@@ -14,11 +14,11 @@ import pandas as pd
 import yaml
 import concurrent.futures
 
-from strategies.trading_strategy import TradingStrategy
-from strategies.risk_manager import RiskManager
-from strategies.backtest_engine import BacktestEngine
-from data.fetcher import DataFetcher
-from utils.helpers import setup_logging
+from ai_trade.strategies.trading_strategy import TradingStrategy
+from ai_trade.strategies.risk_manager import RiskManager
+from ai_trade.strategies.backtest_engine import BacktestEngine
+from ai_trade.data.fetcher import DataFetcher
+from ai_trade.utils.helpers import setup_logging
 
 # Initialize logging
 logger = setup_logging()
